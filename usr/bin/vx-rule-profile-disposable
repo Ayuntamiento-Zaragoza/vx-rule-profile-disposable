@@ -1,0 +1,11 @@
+#!/bin/sh
+
+PATH=/usr/bin:/usr/sbin:/bin:/sbin
+
+_FILE=/etc/vx-rule-profile-disposable.conf
+_USER=$(vx-file-get-key --key USER --file $_FILE)
+_PWD=$(vx-file-get-key --key PWD --file $_FILE)
+
+userdel -r $_USER || :
+useradd --create-home $_USER
+echo $_USER:$_PWD | chpasswd --crypt-method SHA512

@@ -1,0 +1,18 @@
+Source: vx-rule-profile-disposable
+Section: utils
+Priority: extra
+Maintainer: Jose Antonio Chavarría <jachavar@gmail.com>
+Build-Depends: debhelper (>= 8.0.0)
+Standards-Version: 3.9.3
+Homepage: https://github.com/vitalinux/vx-rule-profile-disposable
+
+Package: vx-rule-profile-disposable
+Architecture: all
+Provides: vx-rule-profile, vx-virtual-xdm
+Conflicts: vx-rule-profile, vx-virtual-xdm
+Replaces: vx-rule-profile, vx-virtual-xdm
+Pre-Depends: vx-utils
+Depends: ${misc:Depends}
+Description: Profile disposable in every reboot
+ Configuration in /etc/vx-rule-profile-disposable for user and password
+ Configures autologin user in lightdm as 'kiosk'

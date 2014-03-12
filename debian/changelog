@@ -1,0 +1,8 @@
+vx-rule-profile-disposable (1.0-1) unstable; urgency=low
+
+  * Profile disposable in every reboot
+  * Configuration in /etc/vx-rule-profile-disposable for user and password
+  * Configures autologin user in lightdm as 'kiosk'
+  * Disables lock screen in screensaver
+
+ -- Jose Antonio Chavarría <jachavar@gmail.com>  Tue, 11 Mar 2014 13:36:47 +0200

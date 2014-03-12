@@ -1,0 +1,11 @@
+#!/bin/bash
+
+PATH=/usr/bin:/usr/sbin:/bin:/sbin
+
+_FILE=/etc/vx-rule-profile-disposable.conf
+_USER=$(vx-file-get-key --key USER --file $_FILE)
+_PWD=$(vx-file-get-key --key PWD --file $_FILE)
+
+rm -rf /home/$_USER/{.*,*}
+cp /etc/skel/{.*,*} /home/$_USER
+chown -R $_USER:$_USER /home/$_USER
