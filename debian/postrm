@@ -21,8 +21,6 @@ set -e
 
 case "$1" in
     remove)
-        update-rc.d -f vx-rule-profile-disposable remove || :
-
         dconf update
     ;;
 
