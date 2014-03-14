@@ -20,8 +20,6 @@ set -e
 
 case "$1" in
     configure)
-        update-rc.d vx-rule-profile-disposable defaults
-
         dconf update
     ;;
 
