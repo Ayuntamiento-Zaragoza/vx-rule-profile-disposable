@@ -1,3 +1,10 @@
+vx-rule-profile-disposable (1.2-1) unstable; urgency=low
+
+  * Fixed configuration errors (closes #3)
+  * vx-divert-remove in prerm (close #4)
+
+ -- Jose Antonio Chavarría <jachavar@gmail.com>  Fri, 21 Mar 2014 11:51:12 +0200
+
 vx-rule-profile-disposable (1.1-1) unstable; urgency=low
 
   * Always guest username (closes #1)
