@@ -1,3 +1,9 @@
+vx-rule-profile-disposable (1.2-2) unstable; urgency=low
+
+  * Fixed restore LightDM configuration file (closes #5).
+
+ -- Jose Antonio Chavarría <jachavar@gmail.com>  Wed, 16 Apr 2014 19:41:12 +0200
+
 vx-rule-profile-disposable (1.2-1) unstable; urgency=low
 
   * Fixed configuration errors (closes #3)
