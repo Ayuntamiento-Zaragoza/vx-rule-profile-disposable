@@ -18,14 +18,11 @@ set -e
 
 
 case "$1" in
-    remove|upgrade|deconfigure)
-        if [ "remove" = "$1" ]
-        then
-            vx-divert-remove vx-rule-profile-disposable
-        fi
+    remove)
+        vx-divert-remove $DPKG_MAINTSCRIPT_PACKAGE || :
     ;;
 
-    failed-upgrade)
+    upgrade|deconfigure|failed-upgrade)
     ;;
 
     *)

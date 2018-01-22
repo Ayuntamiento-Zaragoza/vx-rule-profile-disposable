@@ -20,8 +20,8 @@ set -e
 
 case "$1" in
     configure)
-        vx-divert-add vx-rule-profile-disposable
-        dconf update
+        vx-divert-add $DPKG_MAINTSCRIPT_PACKAGE || :
+        dconf update || :
     ;;
 
     abort-upgrade|abort-remove|abort-deconfigure)

@@ -3,8 +3,8 @@ Section: utils
 Priority: extra
 Maintainer: Jose Antonio Chavarría <jachavar@gmail.com>
 Build-Depends: debhelper (>= 8.0.0)
-Standards-Version: 3.9.3
-Homepage: https://github.com/vitalinux-kiosk/vx-rule-profile-disposable
+Standards-Version: 3.9.5
+Homepage: https://github.com/Ayuntamiento-Zaragoza/vx-rule-profile-disposable
 
 Package: vx-rule-profile-disposable
 Architecture: all

@@ -8,141 +8,223 @@
 # If this succeeds, this script needs to print the username as the last line to
 # stdout.
 
+export TEXTDOMAINDIR=/usr/share/locale-langpack
+export TEXTDOMAIN=lightdm
+
+# set the system wide locale for gettext calls
+if [ -f /etc/default/locale ]; then
+  . /etc/default/locale
+  LANGUAGE=
+  export LANG LANGUAGE
+fi
+
+is_system_user ()
+{
+  UID_MIN=$(cat /etc/login.defs | grep UID_MIN | awk '{print $2}')
+  SYS_UID_MIN=$(cat /etc/login.defs | grep SYS_UID_MIN | awk '{print $2}')
+  SYS_UID_MAX=$(cat /etc/login.defs | grep SYS_UID_MAX | awk '{print $2}')
+
+  SYS_UID_MIN=${SYS_UID_MIN:-101}
+  SYS_UID_MAX=${SYS_UID_MAX:-$(( UID_MIN - 1 ))}
+
+  [ ${1} -ge ${SYS_UID_MIN} ] && [ ${1} -le ${SYS_UID_MAX} ]
+}
+
 add_account ()
 {
-  HOME=`mktemp -td guest-XXXXXX`
-  #USER=`echo $HOME | sed 's/\(.*\)guest/guest/'`
-  USER=guest
-
-  if PWSTAT=`passwd -S "$USER"` 2>/dev/null; then
-    remove_account $USER
-  fi
-
-  # if $USER already exists, it must be a locked system account with no existing
-  # home directory
-  if PWSTAT=`passwd -S "$USER"` 2>/dev/null; then
-    if [ "`echo \"$PWSTAT\" | cut -f2 -d\ `" != "L" ]; then
-      echo "User account $USER already exists and is not locked"
-      exit 1
-    fi
-    PWENT=`getent passwd "$USER"` || {
-      echo "getent passwd $USER failed"
+  temp_home=$(mktemp -td guest-XXXXXX)
+  GUEST_HOME=$(echo ${temp_home} | tr '[:upper:]' '[:lower:]')
+  # GUEST_USER=${GUEST_HOME#/tmp/}
+  GUEST_USER=guest
+  if [ "${GUEST_HOME}" != "${temp_home}" ]; then
+    mkdir "${GUEST_HOME}" || {
+      echo "Failed to create ${GUEST_USER}'s home directory (${GUEST_HOME})"
       exit 1
     }
-    GUEST_UID=`echo "$PWENT" | cut -f3 -d:`
-    if [ "$GUEST_UID" -ge 500 ]; then
-      echo "Account $USER is not a system user"
+    rmdir "${temp_home}"
+  fi
+
+  # if ${GUEST_USER} already exists, it must be a locked system account with no existing
+  # home directory
+  if PWSTAT=$(passwd -S ${GUEST_USER}) 2>/dev/null; then
+    if [ $(echo ${PWSTAT} | cut -f2 -d' ') != L ]; then
+      echo "User account ${GUEST_USER} already exists and is not locked"
       exit 1
     fi
-    HOME=`echo "$PWENT" | cut -f6 -d:`
-    if [ "$HOME" != / ] && [ "${HOME#/tmp}" = "$HOME" ] && [ -d "$HOME" ]; then
-      echo "Home directory of $USER already exists"
+
+    PWENT=$(getent passwd ${GUEST_USER}) || {
+      echo "getent passwd ${GUEST_USER} failed"
+      exit 1
+    }
+
+    GUEST_UID=$(echo ${PWENT} | cut -f3 -d:)
+
+    if ! is_system_user ${GUEST_UID}; then
+      echo "Account ${GUEST_USER} is not a system user"
+      exit 1
+    fi
+
+    GUEST_HOME=$(echo ${PWENT} | cut -f6 -d:)
+
+    if [ ${GUEST_HOME} != / ] && [ ${GUEST_HOME#/tmp} = ${GUEST_HOME} ] && [ -d ${GUEST_HOME} ]; then
+      echo "Home directory of ${GUEST_USER} already exists"
       exit 1
     fi
   else
     # does not exist, so create it
-    adduser --system --no-create-home --home $HOME --gecos "Guest" --group --shell /bin/bash $USER || {
-        umount "$HOME"
-        rm -rf "$HOME"
-        exit 1
+    useradd --system --home-dir ${GUEST_HOME} --comment $(gettext "Guest") --user-group --shell /bin/bash ${GUEST_USER} || {
+      rm -rf ${GUEST_HOME}
+      exit 1
     }
   fi
 
+  dist_gs=/usr/share/lightdm/guest-session
+  site_gs=/etc/guest-session
+
   # create temporary home directory
-  mount -t tmpfs -o mode=700 none "$HOME" || { rm -rf "$HOME"; exit 1; }
-  chown $USER:$USER "$HOME"
-  gs_skel=/etc/guest-session/skel/
-  if [ -d "$gs_skel" ] && [ -n "`find $gs_skel -type f`" ]; then
-    cp -rT $gs_skel "$HOME"
-  else
-    cp -rT /etc/skel/ "$HOME"
-  fi
-  chown -R $USER:$USER "$HOME"
-  usermod -d "$HOME" "$USER"
+  mount -t tmpfs -o mode=700,uid=${GUEST_USER} none ${GUEST_HOME} || {
+    rm -rf ${GUEST_HOME}
+    exit 1
+  }
 
-  #
-  # setup session
-  #
+  if [ -d ${site_gs}/skel ] && [ "$(ls -A ${site_gs}/skel)" ]; then
+    # Only perform union-mounting if BindFS is available
+    if [ -x /usr/bin/bindfs ]; then
+      bindfs_mount=true
 
-  # disable some services that are unnecessary for the guest session
-  mkdir --parents "$HOME"/.config/autostart
-  cd /etc/xdg/autostart/
-  services="jockey-gtk.desktop update-notifier.desktop user-dirs-update-gtk.desktop"
-  for service in $services
-  do
-    if [ -e /etc/xdg/autostart/"$service" ] ; then
-        cp "$service" "$HOME"/.config/autostart
-        echo "X-GNOME-Autostart-enabled=false" >> "$HOME"/.config/autostart/"$service"
+      # Try OverlayFS first
+      if modinfo -n overlay >/dev/null 2>&1; then
+        mkdir ${GUEST_HOME}/upper ${GUEST_HOME}/work
+        chown ${GUEST_USER}:${GUEST_USER} ${GUEST_HOME}/upper ${GUEST_HOME}/work
+
+        mount -t overlay -o lowerdir=${dist_gs}/skel:${site_gs}/skel,upperdir=${GUEST_HOME}/upper,workdir=${GUEST_HOME}/work overlay ${GUEST_HOME} || {
+          umount ${GUEST_HOME}
+          rm -rf ${GUEST_HOME}
+          exit 1
+        }
+      # If OverlayFS is not available, try AuFS
+      elif [ -x /sbin/mount.aufs ]; then
+        mount -t aufs -o br=${GUEST_HOME}:${dist_gs}/skel:${site_gs}/skel none ${GUEST_HOME} || {
+          umount ${GUEST_HOME}
+          rm -rf ${GUEST_HOME}
+          exit 1
+        }
+      # If none of them is available, fall back to copy over
+      else
+        cp -rT ${site_gs}/skel/ ${GUEST_HOME}
+        cp -rT ${dist_gs}/skel/ ${GUEST_HOME}
+        chown -R ${GUEST_USER}:${GUEST_USER} ${GUEST_HOME}
+        bindfs_mount=false
+      fi
+
+      if ${bindfs_mount}; then
+        # Wrap ${GUEST_HOME} in a BindFS mount, so that
+        # ${GUEST_USER} will be seen as the owner of ${GUEST_HOME}'s contents.
+        bindfs -u ${GUEST_USER} -g ${GUEST_USER} ${GUEST_HOME} ${GUEST_HOME} || {
+          umount ${GUEST_HOME} # union mount
+          umount ${GUEST_HOME} # tmpfs mount
+          rm -rf ${GUEST_HOME}
+          exit 1
+        }
+      fi
+    # If BindFS is not available, just fall back to copy over
+    else
+      cp -rT ${site_gs}/skel/ ${GUEST_HOME}
+      cp -rT ${dist_gs}/skel/ ${GUEST_HOME}
+      chown -R ${GUEST_USER}:${GUEST_USER} ${GUEST_HOME}
     fi
-  done
+  else
+    cp -rT /etc/skel/ ${GUEST_HOME}
+    cp -rT ${dist_gs}/skel/ ${GUEST_HOME}
+    chown -R ${GUEST_USER}:${GUEST_USER} ${GUEST_HOME}
+  fi
 
-  echo "[Desktop Entry]" >> "$HOME"/.config/autostart/screenlocking.desktop
-  echo "Name='Disable screen locking in guest session'" >> "$HOME"/.config/autostart/screenlocking.desktop
-  echo "Type=Application" >> "$HOME"/.config/autostart/screenlocking.desktop
-  echo "Exec=gsettings set org.gnome.desktop.lockdown disable-lock-screen true" >> "$HOME"/.config/autostart/screenlocking.desktop
-
-  # Load restricted session
-  #dmrc='[Desktop]\nSession=guest-restricted'
-  #/bin/echo -e "$dmrc" > "$HOME"/.dmrc
-
-  chown -R $USER:$USER "$HOME"
+  # setup session
+  su ${GUEST_USER} -c "env HOME=${GUEST_HOME} site_gs=${site_gs} ${dist_gs}/setup.sh"
 
   # set possible local guest session preferences
-  if [ -f /etc/guest-session/prefs.sh ]; then
-      . /etc/guest-session/prefs.sh
+  source_local_prefs() {
+    local USER=${GUEST_USER}
+    local HOME=${GUEST_HOME}
+    . ${site_gs}/prefs.sh
+    chown -R ${USER}:${USER} ${HOME}
+  }
+  if [ -f ${site_gs}/prefs.sh ]; then
+    source_local_prefs
   fi
 
-  echo $USER
+  echo ${GUEST_USER}
 }
 
 remove_account ()
 {
-  USER=$1
+  GUEST_USER=${1}
 
-  PWENT=`getent passwd "$USER"` || {
-    echo "Error: invalid user $USER"
+  PWENT=$(getent passwd ${GUEST_USER}) || {
+    echo "Error: invalid user ${GUEST_USER}"
     exit 1
   }
-  _UID=`echo "$PWENT" | cut -f3 -d:`
-  _HOME=`echo "$PWENT" | cut -f6 -d:`
 
-  if [ "$_UID" -ge 500 ]; then
-    echo "Error: user $USER is not a system user."
+  GUEST_UID=$(echo ${PWENT} | cut -f3 -d:)
+
+  if ! is_system_user ${GUEST_UID}; then
+    echo "Error: user ${GUEST_USER} is not a system user."
     exit 1
   fi
 
-  if [ "${_HOME}" = "${_HOME#/tmp/}" ]; then
-    echo "Error: home directory $_HOME is not in /tmp/."
-    exit 1
-  fi
+  GUEST_HOME=$(echo ${PWENT} | cut -f6 -d:)
 
   # kill all remaining processes
-  while ps h -u "$USER" >/dev/null; do
-    killall -9 -u "$USER" || true
-    sleep 0.2;
-  done
+  if [ -x /bin/loginctl ] || [ -x /usr/bin/loginctl ]; then
+    loginctl --signal=9 kill-user ${GUEST_USER} >/dev/null || true
+  else
+    while ps h -u ${GUEST_USER} >/dev/null
+    do
+      killall -9 -u ${GUEST_USER} || true
+      sleep 0.2;
+    done
+  fi
 
-  umount "$_HOME" || umount -l "$_HOME" || true
-  rm -rf "$_HOME"
+  if [ ${GUEST_HOME} = ${GUEST_HOME#/tmp/} ]; then
+    echo "Warning: home directory ${GUEST_HOME} is not in /tmp/. It won't be removed."
+  else
+    umount ${GUEST_HOME} || umount -l ${GUEST_HOME} || true # BindFS mount
+    umount ${GUEST_HOME} || umount -l ${GUEST_HOME} || true # union mount
+    umount ${GUEST_HOME} || umount -l ${GUEST_HOME} || true # tmpfs mount
+    rm -rf ${GUEST_HOME}
+  fi
 
   # remove leftovers in /tmp
-  find /tmp -mindepth 1 -maxdepth 1 -uid "$_UID" -print0 | xargs -0 rm -rf || true
+  find /tmp -mindepth 1 -maxdepth 1 -uid ${GUEST_UID} -print0 | xargs -0 rm -rf || true
 
-  deluser --system "$USER"
+  # remove possible {/run,}/media/guest-XXXXXX folder
+  for media_dir in /run/media/${GUEST_USER} /media/${GUEST_USER}; do
+    if [ -d ${media_dir} ]; then
+      for dir in $(find ${media_dir} -mindepth 1 -maxdepth 1); do
+        umount ${dir} || true
+      done
+
+      rmdir ${media_dir} || true
+    fi
+  done
+
+  userdel --force ${GUEST_USER}
 }
 
-case "$1" in
+case ${1} in
   add)
     add_account
     ;;
   remove)
-    if [ -z $2 ] ; then
-      echo "Usage: $0 remove [account]"
+    if [ -z ${2} ] ; then
+      echo "Usage: ${0} remove [account]"
       exit 1
     fi
-    remove_account $2
+
+    remove_account ${2}
     ;;
   *)
-    echo "Usage: $0 add|remove"
+    echo "Usage: ${0} add"
+    echo "       ${0} remove [account]"
     exit 1
 esac
