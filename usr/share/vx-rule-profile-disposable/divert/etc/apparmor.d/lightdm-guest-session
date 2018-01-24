@@ -21,4 +21,4 @@
 
   # mozc_server needs special treatment due to C/S design
   #unix (bind, listen) type=stream addr="@tmp/.mozc.*",
-}
+#}
